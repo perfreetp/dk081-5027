@@ -510,4 +510,97 @@ public class ExceptionHandleServiceImpl implements ExceptionHandleService {
             default: return "未知状态";
         }
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UrgeRecord escalateUrgeLevel(Long taskId, Integer escalateLevel, String operatorId, String operatorName) {
+        CollaborationTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException(BusinessErrorEnum.TASK_NOT_FOUND);
+        }
+        if (!PENDING_STATUS.contains(task.getTaskStatus()) && !TaskStatusEnum.URGED.getCode().equals(task.getTaskStatus())) {
+            throw new BusinessException(BusinessErrorEnum.TASK_STATUS_ERROR, "任务状态不允许催办升级");
+        }
+
+        UrgeEscalateLevelEnum levelEnum = UrgeEscalateLevelEnum.getByLevel(escalateLevel);
+        if (levelEnum == null) {
+            throw new BusinessException(BusinessErrorEnum.PARAM_ERROR, "无效的升级级别，有效值：0普通 1中心主任 2省级 3部级");
+        }
+
+        Integer urgeType;
+        boolean isEscalated = false;
+        switch (escalateLevel) {
+            case 0:
+                urgeType = 2; // 人工催办
+                break;
+            case 1:
+                urgeType = 11; // 升级至中心主任
+                isEscalated = true;
+                break;
+            case 2:
+                urgeType = 12; // 升级至省级监管
+                isEscalated = true;
+                break;
+            case 3:
+                urgeType = 13; // 升级至部级监管
+                isEscalated = true;
+                break;
+            default:
+                urgeType = 2;
+        }
+
+        TransferApplication app = applicationMapper.selectById(task.getApplicationId());
+        String customContent = String.format("[%s] 【%s】：申请编号%s，申请人%s，请立即处理%s任务。任务编号：%s。",
+                levelEnum.getName(),
+                getRegionName(task.getTargetRegion()) + "公积金中心",
+                task.getApplicationNo(),
+                app != null ? app.getApplicantName() : "申请人",
+                task.getTaskType() == 1 ? "转出确认" : "转入确认",
+                task.getTaskNo());
+
+        UrgeRecord urgeRecord = doUrgeTask(task, urgeType, escalateLevel, customContent, operatorId, operatorName);
+
+        if (isEscalated) {
+            urgeRecord.setIsEscalated(true);
+            urgeRecord.setEscalateLevel(escalateLevel);
+            urgeRecord.setEscalateToRegion(task.getTargetRegion());
+            urgeRecord.setEscalateToCenter(levelEnum.getName());
+            urgeRecord.setEscalateTo(getRegionName(task.getTargetRegion()) + " " + levelEnum.getName());
+            urgeRecordMapper.updateById(urgeRecord);
+        }
+
+        log.info("[催办升级] 任务[{}] 手动升级至级别:{} ({})", task.getTaskNo(), escalateLevel, levelEnum.getName());
+        return urgeRecord;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CollaborationTask simulateTaskTimeout(Long taskId, Integer timeoutDays) {
+        CollaborationTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException(BusinessErrorEnum.TASK_NOT_FOUND);
+        }
+        if (timeoutDays == null || timeoutDays < 0) {
+            timeoutDays = 3;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime deadlineTime = now.minusDays(timeoutDays);
+        LocalDateTime assignTime = deadlineTime.minusDays(5);
+
+        task.setAssignTime(assignTime);
+        task.setDeadlineTime(deadlineTime);
+        task.setIsTimeout(1);
+        task.setTimeoutDays(timeoutDays);
+        taskMapper.updateById(task);
+
+        TransferApplication app = applicationMapper.selectById(task.getApplicationId());
+        if (app != null) {
+            app.setIsTimeout(1);
+            applicationMapper.updateById(app);
+        }
+
+        log.info("[模拟超时] 任务[{}] 设置为已超时 {} 天", task.getTaskNo(), timeoutDays);
+        return task;
+    }
 }

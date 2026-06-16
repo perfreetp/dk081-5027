@@ -45,6 +45,8 @@ public class RegionInfo implements Serializable {
 
     private Integer sortOrder;
 
+    private Integer regionLevel;
+
     @TableLogic
     @TableField(fill = FieldFill.INSERT)
     private Integer deleted;

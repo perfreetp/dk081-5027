@@ -745,6 +745,17 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
             throw new BusinessException(BusinessErrorEnum.APPLICATION_NOT_FOUND);
         }
 
+        // 办结状态检查：只有已办结/已取消/已终止的申请才能查询归档摘要
+        List<Integer> completedStatus = Arrays.asList(80, 90, 95);
+        if (!completedStatus.contains(app.getApplicationStatus())) {
+            ApplicationStatusEnum statusEnum = ApplicationStatusEnum.getByCode(app.getApplicationStatus());
+            String statusName = statusEnum != null ? statusEnum.getName() : "未知状态";
+            String statusDesc = statusEnum != null ? statusEnum.getDescription() : "";
+            String message = String.format("申请当前状态为【%s】，%s。请等待申请办结后再查询归档摘要。", 
+                    statusName, statusDesc);
+            throw new BusinessException(BusinessErrorEnum.APPLICATION_NOT_COMPLETED, message);
+        }
+
         com.hf.transfer.domain.vo.ArchiveSummaryVO archive = new com.hf.transfer.domain.vo.ArchiveSummaryVO();
         archive.setArchiveNo("ARC" + System.currentTimeMillis() + RandomUtil.randomNumbers(4));
         archive.setArchiveTime(LocalDateTime.now());

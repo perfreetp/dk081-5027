@@ -84,6 +84,8 @@ public class TransferApplication implements Serializable {
 
     private Integer urgeCount;
 
+    private Integer isTimeout;
+
     private Integer isDuplicate;
 
     private String duplicateAppNo;

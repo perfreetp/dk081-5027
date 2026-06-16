@@ -17,6 +17,7 @@ public enum BusinessErrorEnum {
     APPLICATION_DUPLICATE(1002, "存在重复申请"),
     APPLICATION_CONFLICT(1003, "存在冲突申请"),
     APPLICATION_STATUS_ERROR(1004, "申请状态不允许当前操作"),
+    APPLICATION_NOT_COMPLETED(1005, "申请尚未办结，暂无法查询归档摘要"),
 
     RULE_NOT_FOUND(2001, "地区受理规则不存在"),
     RULE_VALIDATE_FAIL(2002, "规则校验未通过"),

@@ -39,4 +39,8 @@ public interface ExceptionHandleService {
                                             java.time.LocalDateTime endTime);
 
     java.util.List<UrgeRecord> getUrgeRecordsByApplication(Long applicationId);
+
+    UrgeRecord escalateUrgeLevel(Long taskId, Integer escalateLevel, String operatorId, String operatorName);
+
+    com.hf.transfer.domain.entity.CollaborationTask simulateTaskTimeout(Long taskId, Integer timeoutDays);
 }

@@ -63,6 +63,10 @@ public class CollaborationTask implements Serializable {
 
     private Integer urgeCount;
 
+    private Integer isTimeout;
+
+    private Integer timeoutDays;
+
     private String remark;
 
     private String operatorId;

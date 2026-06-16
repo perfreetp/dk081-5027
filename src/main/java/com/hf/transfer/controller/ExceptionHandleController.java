@@ -4,6 +4,7 @@ import com.hf.transfer.common.PageResult;
 import com.hf.transfer.common.R;
 import com.hf.transfer.common.annotation.OpLog;
 import com.hf.transfer.domain.dto.SupplementSubmitDTO;
+import com.hf.transfer.domain.entity.CollaborationTask;
 import com.hf.transfer.domain.entity.RejectReason;
 import com.hf.transfer.domain.entity.UrgeRecord;
 import com.hf.transfer.domain.vo.SupplementDetailVO;
@@ -122,5 +123,26 @@ public class ExceptionHandleController {
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
         return R.success(exceptionHandleService.queryUrgeRecords(
                 current, size, taskId, applicationNo, targetRegion, urgeType, startTime, endTime));
+    }
+
+    @Operation(summary = "手动升级催办级别", description = "测试专用：可控地触发普通催办、升级中心主任、升级省级、升级部级等催办记录")
+    @PostMapping("/urge/escalate/{taskId}")
+    @OpLog(logType = "URGE", bizType = "ESCALATE", module = "异常处置", desc = "手动升级催办级别")
+    public R<UrgeRecord> escalateUrgeLevel(
+            @Parameter(description = "任务ID") @PathVariable Long taskId,
+            @Parameter(description = "升级级别：0普通催办 1升级至中心主任 2升级至省级监管 3升级至部级监管", required = true) @RequestParam Integer escalateLevel,
+            @RequestHeader(value = "X-Operator-Id", required = false) String operatorId,
+            @RequestHeader(value = "X-Operator-Name", required = false) String operatorName) {
+        return R.success("催办升级成功",
+                exceptionHandleService.escalateUrgeLevel(taskId, escalateLevel, operatorId, operatorName));
+    }
+
+    @Operation(summary = "模拟任务超时", description = "测试专用：将任务设置为已超时N天，配合催办扫描和升级接口使用")
+    @PostMapping("/task/{taskId}/simulate-timeout")
+    @OpLog(logType = "SYSTEM", bizType = "SIMULATE", module = "异常处置", desc = "模拟任务超时")
+    public R<CollaborationTask> simulateTaskTimeout(
+            @Parameter(description = "任务ID") @PathVariable Long taskId,
+            @Parameter(description = "超时时长（天），默认3天") @RequestParam(defaultValue = "3") Integer timeoutDays) {
+        return R.success("模拟超时成功", exceptionHandleService.simulateTaskTimeout(taskId, timeoutDays));
     }
 }
