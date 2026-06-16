@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 
@@ -160,8 +160,8 @@ public class OperationLogAspect {
     }
 
     private boolean isSerializable(Object obj) {
-        if (obj instanceof javax.servlet.http.HttpServletRequest) return false;
-        if (obj instanceof javax.servlet.http.HttpServletResponse) return false;
+        if (obj instanceof jakarta.servlet.http.HttpServletRequest) return false;
+        if (obj instanceof jakarta.servlet.http.HttpServletResponse) return false;
         if (obj instanceof org.springframework.web.multipart.MultipartFile) return false;
         return true;
     }

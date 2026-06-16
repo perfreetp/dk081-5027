@@ -5,67 +5,67 @@ import com.hf.transfer.common.annotation.OpLog;
 import com.hf.transfer.domain.dto.TransferApplyDTO;
 import com.hf.transfer.domain.entity.RegionRule;
 import com.hf.transfer.domain.entity.TransferApplication;
+import com.hf.transfer.mapper.TransferApplicationMapper;
 import com.hf.transfer.service.RuleValidationService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiImplicitParam;
-import io.swagger.annotations.ApiImplicitParams;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@Api(tags = "2. 规则校验模块 - 地区规则匹配、重复冲突识别")
+@Tag(name = "2. 规则校验模块", description = "地区规则匹配、重复/冲突申请识别")
 @RestController
 @RequestMapping("/api/v1/rule")
 @RequiredArgsConstructor
 public class RuleValidationController {
 
     private final RuleValidationService ruleValidationService;
+    private final TransferApplicationMapper applicationMapper;
 
-    @ApiOperation("2.1 匹配地区受理规则")
+    @Operation(summary = "匹配地区受理规则", description = "按地区编码+规则类型匹配当前有效的受理规则")
     @GetMapping("/match")
-    @ApiImplicitParams({
-            @ApiImplicitParam(name = "regionCode", value = "地区编码", required = true),
-            @ApiImplicitParam(name = "ruleType", value = "规则类型：1转出 2转入 3通用", required = true)
-    })
-    public R<RegionRule> matchRegionRule(@RequestParam String regionCode,
-                                          @RequestParam Integer ruleType) {
+    public R<RegionRule> matchRegionRule(
+            @Parameter(description = "地区编码") @RequestParam String regionCode,
+            @Parameter(description = "规则类型：1转出 2转入 3通用") @RequestParam Integer ruleType) {
         return R.success(ruleValidationService.matchRegionRule(regionCode, ruleType));
     }
 
-    @ApiOperation("2.2 为申请匹配转出/转入规则")
+    @Operation(summary = "为申请匹配转出/转入规则", description = "同时匹配转出地+转入地规则")
     @PostMapping("/matchForApplication")
     public R<List<RegionRule>> matchForApplication(@RequestBody TransferApplyDTO dto) {
         return R.success(ruleValidationService.matchRulesForApplication(dto));
     }
 
-    @ApiOperation("2.3 基础规则校验")
+    @Operation(summary = "基础规则校验", description = "校验金额/限额/属地化等基础规则")
     @PostMapping("/validate")
     @OpLog(logType = "RULE", bizType = "AUDIT", module = "规则校验", desc = "执行基础规则校验")
     public R<RuleValidationService.ValidationResult> validate(@RequestBody TransferApplyDTO dto) {
         return R.success(ruleValidationService.validateApplication(dto));
     }
 
-    @ApiOperation("2.4 重复申请检测")
+    @Operation(summary = "重复申请检测", description = "检测90天内同证件号+同转出转入地的在途申请")
     @PostMapping("/checkDuplicate")
     public R<RuleValidationService.DuplicateCheckResult> checkDuplicate(@RequestBody TransferApplyDTO dto) {
         return R.success(ruleValidationService.checkDuplicate(dto));
     }
 
-    @ApiOperation("2.5 冲突申请检测")
+    @Operation(summary = "冲突申请检测", description = "检测同转出地向不同地区转出、或同地区多笔转入")
     @PostMapping("/checkConflict")
     public R<RuleValidationService.ConflictCheckResult> checkConflict(@RequestBody TransferApplyDTO dto) {
         return R.success(ruleValidationService.checkConflict(dto));
     }
 
-    @ApiOperation("2.6 完整规则校验（含重复/冲突/规则）")
+    @Operation(summary = "完整规则校验", description = "含重复/冲突/规则全量校验，返回通过项和未通过项")
     @PostMapping("/validateFull")
     @OpLog(logType = "RULE", bizType = "AUDIT", module = "规则校验", desc = "执行完整规则校验")
-    @ApiImplicitParam(name = "applicationId", value = "申请ID", required = true)
-    public R<RuleValidationService.RuleValidateVO> validateFull(@RequestParam Long applicationId) {
-        TransferApplication app = new TransferApplication();
-        app.setId(applicationId);
+    public R<RuleValidationService.RuleValidateVO> validateFull(
+            @Parameter(description = "申请ID") @RequestParam Long applicationId) {
+        TransferApplication app = applicationMapper.selectById(applicationId);
+        if (app == null) {
+            return R.error("申请不存在");
+        }
         return R.success(ruleValidationService.validateFull(app));
     }
 }

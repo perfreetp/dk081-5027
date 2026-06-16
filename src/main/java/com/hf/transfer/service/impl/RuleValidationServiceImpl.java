@@ -114,6 +114,11 @@ public class RuleValidationServiceImpl implements RuleValidationService {
 
     @Override
     public DuplicateCheckResult checkDuplicate(TransferApplyDTO dto) {
+        return checkDuplicate(dto, null);
+    }
+
+    @Override
+    public DuplicateCheckResult checkDuplicate(TransferApplyDTO dto, Long excludeApplicationId) {
         DuplicateCheckResult result = new DuplicateCheckResult();
 
         LambdaQueryWrapper<TransferApplication> wrapper = new LambdaQueryWrapper<>();
@@ -122,6 +127,9 @@ public class RuleValidationServiceImpl implements RuleValidationService {
                 .eq(TransferApplication::getTransferInRegion, dto.getTransferInRegion())
                 .in(TransferApplication::getApplicationStatus, PROCESSING_STATUS)
                 .ge(TransferApplication::getSubmitTime, LocalDateTime.now().minusDays(90));
+        if (excludeApplicationId != null) {
+            wrapper.ne(TransferApplication::getId, excludeApplicationId);
+        }
 
         List<TransferApplication> duplicates = applicationMapper.selectList(wrapper);
 
@@ -141,12 +149,20 @@ public class RuleValidationServiceImpl implements RuleValidationService {
 
     @Override
     public ConflictCheckResult checkConflict(TransferApplyDTO dto) {
+        return checkConflict(dto, null);
+    }
+
+    @Override
+    public ConflictCheckResult checkConflict(TransferApplyDTO dto, Long excludeApplicationId) {
         ConflictCheckResult result = new ConflictCheckResult();
         List<String> reasons = new ArrayList<>();
 
         LambdaQueryWrapper<TransferApplication> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TransferApplication::getIdCardNo, dto.getIdCardNo())
                 .in(TransferApplication::getApplicationStatus, PROCESSING_STATUS);
+        if (excludeApplicationId != null) {
+            wrapper.ne(TransferApplication::getId, excludeApplicationId);
+        }
         List<TransferApplication> processingApps = applicationMapper.selectList(wrapper);
 
         for (TransferApplication app : processingApps) {
@@ -203,7 +219,7 @@ public class RuleValidationServiceImpl implements RuleValidationService {
         temp.setTransferInRegion(application.getTransferInRegion());
         temp.setTransferAmount(application.getTransferAmount());
 
-        DuplicateCheckResult dupResult = checkDuplicate(temp);
+        DuplicateCheckResult dupResult = checkDuplicate(temp, application.getId());
         if (dupResult.isDuplicate()) {
             failedItems.add(dupResult.getDescription());
             vo.setRejectReasonCode("R013");
@@ -212,7 +228,7 @@ public class RuleValidationServiceImpl implements RuleValidationService {
             passedItems.add("重复申请检测通过");
         }
 
-        ConflictCheckResult conflictResult = checkConflict(temp);
+        ConflictCheckResult conflictResult = checkConflict(temp, application.getId());
         if (conflictResult.isConflict()) {
             failedItems.addAll(conflictResult.getConflictReasons());
         } else {

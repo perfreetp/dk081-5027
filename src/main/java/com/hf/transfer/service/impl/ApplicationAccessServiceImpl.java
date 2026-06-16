@@ -1,6 +1,7 @@
 package com.hf.transfer.service.impl;
 
 import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -76,7 +77,7 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
         TransferApplication app = new TransferApplication();
         BeanUtils.copyProperties(dto, app);
 
-        String applicationNo = "HF" + System.currentTimeMillis() + IdUtil.randomNumbers(4);
+        String applicationNo = "HF" + System.currentTimeMillis() + RandomUtil.randomNumbers(4);
         app.setApplicationNo(applicationNo);
         app.setApplicationStatus(ApplicationStatusEnum.PENDING_REVIEW.getCode());
         app.setCurrentNode("PENDING_REVIEW");
@@ -118,7 +119,7 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
                                           RuleValidationService.DuplicateCheckResult dupResult) {
         TransferApplication app = new TransferApplication();
         BeanUtils.copyProperties(dto, app);
-        String applicationNo = "HFDUP" + System.currentTimeMillis() + IdUtil.randomNumbers(4);
+        String applicationNo = "HFDUP" + System.currentTimeMillis() + RandomUtil.randomNumbers(4);
         app.setApplicationNo(applicationNo);
         app.setApplicationStatus(ApplicationStatusEnum.DUPLICATE_REJECTED.getCode());
         app.setCurrentNode("DUPLICATE_REJECTED");

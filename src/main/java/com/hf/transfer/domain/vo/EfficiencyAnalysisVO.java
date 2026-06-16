@@ -26,11 +26,11 @@ public class EfficiencyAnalysisVO implements Serializable {
 
     private BigDecimal sLAComplianceRate;
 
-    private Long within3DaysCount;
+    private Long within3Days;
 
-    private Long within7DaysCount;
+    private Long within7Days;
 
-    private Long within15DaysCount;
+    private Long within15Days;
 
-    private Long over15DaysCount;
+    private Long over15Days;
 }

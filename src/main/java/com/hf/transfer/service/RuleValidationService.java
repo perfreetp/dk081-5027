@@ -17,7 +17,11 @@ public interface RuleValidationService {
 
     DuplicateCheckResult checkDuplicate(TransferApplyDTO dto);
 
+    DuplicateCheckResult checkDuplicate(TransferApplyDTO dto, Long excludeApplicationId);
+
     ConflictCheckResult checkConflict(TransferApplyDTO dto);
+
+    ConflictCheckResult checkConflict(TransferApplyDTO dto, Long excludeApplicationId);
 
     RuleValidateVO validateFull(TransferApplication application);
 

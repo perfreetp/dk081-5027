@@ -61,6 +61,8 @@ public class CollaborationTask implements Serializable {
 
     private String syncResponse;
 
+    private Integer urgeCount;
+
     private String remark;
 
     private String operatorId;
