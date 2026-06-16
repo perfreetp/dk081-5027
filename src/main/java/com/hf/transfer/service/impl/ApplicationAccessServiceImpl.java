@@ -12,13 +12,21 @@ import com.hf.transfer.common.PageResult;
 import com.hf.transfer.common.enums.ApplicationStatusEnum;
 import com.hf.transfer.common.enums.ChannelTypeEnum;
 import com.hf.transfer.common.enums.TaskStatusEnum;
+import com.hf.transfer.common.enums.UrgeEscalateLevelEnum;
+import com.hf.transfer.common.enums.UrgeTypeEnum;
 import com.hf.transfer.domain.dto.ApplicationQueryDTO;
 import com.hf.transfer.domain.dto.TransferApplyDTO;
 import com.hf.transfer.domain.entity.ApplicationMaterial;
 import com.hf.transfer.domain.entity.ApplicationStatusLog;
 import com.hf.transfer.domain.entity.CollaborationTask;
+import com.hf.transfer.domain.entity.OperationLog;
 import com.hf.transfer.domain.entity.RegionInfo;
+import com.hf.transfer.domain.entity.RegionRule;
+import com.hf.transfer.domain.entity.RejectReason;
+import com.hf.transfer.domain.entity.SupplementRecord;
 import com.hf.transfer.domain.entity.TransferApplication;
+import com.hf.transfer.domain.entity.UrgeRecord;
+import com.hf.transfer.domain.vo.ApplicationCallbackVO;
 import com.hf.transfer.domain.vo.ApplicationDetailVO;
 import com.hf.transfer.domain.vo.ApplicationListVO;
 import com.hf.transfer.domain.vo.MaterialVO;
@@ -40,6 +48,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,6 +68,13 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
     private final StatusLogService statusLogService;
     private final RuleValidationService ruleValidationService;
     private final CollaborationFlowService collaborationFlowService;
+    private final com.hf.transfer.service.ExceptionHandleService exceptionHandleService;
+    private final com.hf.transfer.mapper.ApplicationStatusLogMapper statusLogMapper;
+    private final com.hf.transfer.mapper.OperationLogMapper operationLogMapper;
+    private final com.hf.transfer.mapper.SupplementRecordMapper supplementRecordMapper;
+    private final com.hf.transfer.mapper.RejectReasonMapper rejectReasonMapper;
+    private final com.hf.transfer.mapper.UrgeRecordMapper urgeRecordMapper;
+    private final com.hf.transfer.mapper.CollaborationTaskMapper taskMapper;
 
     private static final String OPERATE_TYPE_SUBMIT = "SUBMIT";
     private static final String OPERATE_TYPE_CANCEL = "CANCEL";
@@ -217,6 +233,27 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
         vo.setUrgeCount(app.getUrgeCount());
 
         vo.setSteps(buildProgressSteps(app));
+
+        // 催办升级记录
+        List<UrgeRecord> urgeRecords = exceptionHandleService.getUrgeRecordsByApplication(app.getId());
+        if (urgeRecords != null && !urgeRecords.isEmpty()) {
+            List<ApplicationCallbackVO.UrgeRecordVO> urgeVOs = urgeRecords.stream().map(u -> {
+                ApplicationCallbackVO.UrgeRecordVO urgeVO = new ApplicationCallbackVO.UrgeRecordVO();
+                urgeVO.setUrgeType(u.getUrgeType());
+                urgeVO.setUrgeTypeName(UrgeTypeEnum.getNameByCode(u.getUrgeType()));
+                urgeVO.setUrgeLevel(u.getUrgeLevel());
+                urgeVO.setUrgeLevelName(UrgeEscalateLevelEnum.getNameByCode(u.getUrgeLevel()));
+                urgeVO.setUrgeContent(u.getUrgeContent());
+                urgeVO.setOperatorName(u.getUrgeOperatorName());
+                urgeVO.setUrgeTime(u.getCreateTime());
+                urgeVO.setIsEscalated(u.getIsEscalated());
+                if (u.getIsEscalated() != null && u.getIsEscalated()) {
+                    urgeVO.setEscalateTo(u.getEscalateToRegion() + " " + u.getEscalateToCenter());
+                }
+                return urgeVO;
+            }).collect(Collectors.toList());
+            vo.setUrgeLogs(urgeVOs);
+        }
 
         return vo;
     }
@@ -524,5 +561,356 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
     private String maskMobile(String mobile) {
         if (StrUtil.isBlank(mobile) || mobile.length() < 7) return mobile;
         return mobile.substring(0, 3) + "****" + mobile.substring(mobile.length() - 4);
+    }
+
+    @Override
+    public com.hf.transfer.domain.vo.ApplicationCallbackVO getCallbackInfo(String applicationNo) {
+        LambdaQueryWrapper<TransferApplication> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TransferApplication::getApplicationNo, applicationNo);
+        TransferApplication app = applicationMapper.selectOne(wrapper);
+        if (app == null) {
+            throw new BusinessException(BusinessErrorEnum.APPLICATION_NOT_FOUND);
+        }
+
+        com.hf.transfer.domain.vo.ApplicationCallbackVO vo = new com.hf.transfer.domain.vo.ApplicationCallbackVO();
+        vo.setApplicationNo(app.getApplicationNo());
+        vo.setApplicationStatus(app.getApplicationStatus());
+        ApplicationStatusEnum statusEnum = ApplicationStatusEnum.getByCode(app.getApplicationStatus());
+        if (statusEnum != null) {
+            vo.setApplicationStatusName(statusEnum.getName());
+            vo.setApplicationStatusDesc(statusEnum.getDescription());
+        }
+        vo.setCurrentNode(app.getCurrentNode());
+        vo.setCurrentRegionCode(app.getCurrentRegion());
+        vo.setCurrentRegionName(getRegionName(app.getCurrentRegion()));
+
+        vo.setApplicantName(maskName(app.getApplicantName()));
+        vo.setIdCardNo(maskIdCard(app.getIdCardNo()));
+        vo.setTransferOutRegionName(getRegionName(app.getTransferOutRegion()));
+        vo.setTransferInRegionName(getRegionName(app.getTransferInRegion()));
+        vo.setTransferAmount(app.getTransferAmount());
+        vo.setActualTransferAmount(app.getActualTransferAmount());
+
+        vo.setSubmitTime(app.getSubmitTime());
+        vo.setExpectedCompleteTime(app.getExpectedCompleteTime());
+        vo.setCompleteTime(app.getCompleteTime());
+
+        vo.setLastOperation(findLastOperation(app.getId()));
+        vo.setNextTodo(findNextTodo(app));
+
+        List<UrgeRecord> urgeRecords = exceptionHandleService.getUrgeRecordsByApplication(app.getId());
+        vo.setUrgeRecords(urgeRecords.stream().map(this::convertUrgeRecord).collect(Collectors.toList()));
+
+        boolean isCompleted = ApplicationStatusEnum.COMPLETED.getCode().equals(app.getApplicationStatus())
+                || ApplicationStatusEnum.TERMINATED.getCode().equals(app.getApplicationStatus())
+                || ApplicationStatusEnum.CANCELLED.getCode().equals(app.getApplicationStatus());
+        vo.setIsCompleted(isCompleted);
+
+        if (app.getExpectedCompleteTime() != null) {
+            long days = Duration.between(LocalDateTime.now(), app.getExpectedCompleteTime()).toDays();
+            vo.setIsTimeout(days < 0);
+            vo.setRemainingDays((int) Math.abs(days));
+        } else {
+            vo.setIsTimeout(false);
+            vo.setRemainingDays(null);
+        }
+
+        return vo;
+    }
+
+    private com.hf.transfer.domain.vo.ApplicationCallbackVO.OperationLogVO findLastOperation(Long applicationId) {
+        LambdaQueryWrapper<ApplicationStatusLog> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ApplicationStatusLog::getApplicationId, applicationId)
+                .orderByDesc(ApplicationStatusLog::getCreateTime)
+                .last("LIMIT 1");
+        ApplicationStatusLog log = statusLogMapper.selectOne(wrapper);
+        if (log == null) return null;
+
+        com.hf.transfer.domain.vo.ApplicationCallbackVO.OperationLogVO vo = new com.hf.transfer.domain.vo.ApplicationCallbackVO.OperationLogVO();
+        vo.setOperateType(log.getOperateType());
+        vo.setOperateDesc(log.getOperateDesc());
+        vo.setOperatorName(log.getOperatorName());
+        vo.setOperateRegionName(getRegionName(log.getOperateRegion()));
+        vo.setOperateTime(log.getCreateTime());
+        vo.setRemark(log.getOperateRemark());
+        return vo;
+    }
+
+    private com.hf.transfer.domain.vo.ApplicationCallbackVO.NextTodoVO findNextTodo(TransferApplication app) {
+        Integer status = app.getApplicationStatus();
+        if (status == null) return null;
+
+        com.hf.transfer.domain.vo.ApplicationCallbackVO.NextTodoVO vo = new com.hf.transfer.domain.vo.ApplicationCallbackVO.NextTodoVO();
+
+        switch (status) {
+            case 10:
+            case 20:
+                vo.setTodoType("AUDIT");
+                vo.setTodoName("等待规则校验");
+                vo.setHandleRegion(app.getTransferInRegion());
+                vo.setHandleRegionName(getRegionName(app.getTransferInRegion()));
+                vo.setRequirement("系统自动完成规则校验，无需人工干预");
+                break;
+            case 30:
+            case 40:
+                vo.setTodoType("TRANSFER_OUT");
+                vo.setTodoName("等待转出地确认");
+                vo.setHandleRegion(app.getTransferOutRegion());
+                vo.setHandleRegionName(getRegionName(app.getTransferOutRegion()));
+                vo.setRequirement("请转出地公积金中心在规定时限内完成转出确认");
+                vo.setDeadline(findTaskDeadline(app.getId(), 1));
+                break;
+            case 50:
+            case 60:
+                vo.setTodoType("TRANSFER_IN");
+                vo.setTodoName("等待转入地确认");
+                vo.setHandleRegion(app.getTransferInRegion());
+                vo.setHandleRegionName(getRegionName(app.getTransferInRegion()));
+                vo.setRequirement("请转入地公积金中心在规定时限内完成到账确认");
+                vo.setDeadline(findTaskDeadline(app.getId(), 2));
+                break;
+            case 70:
+                vo.setTodoType("SUPPLEMENT");
+                vo.setTodoName("等待补正材料");
+                vo.setHandleRegion(app.getTransferOutRegion());
+                vo.setHandleRegionName(getRegionName(app.getTransferOutRegion()));
+                vo.setRequirement("申请人需补充完善相关材料后重新提交审核");
+                SupplementRecord supp = getLatestSupplement(app.getId());
+                if (supp != null) {
+                    vo.setDeadline(supp.getDeadlineTime());
+                }
+                break;
+            case 80:
+                vo.setTodoType("COMPLETED");
+                vo.setTodoName("已办结");
+                vo.setRequirement("转移接续业务已完成，无需进一步操作");
+                break;
+            case 90:
+                vo.setTodoType("CANCELLED");
+                vo.setTodoName("已取消");
+                vo.setRequirement("申请已取消，流程终止");
+                break;
+            case 95:
+                vo.setTodoType("TERMINATED");
+                vo.setTodoName("已终止");
+                vo.setRequirement("申请已终止，流程结束");
+                break;
+            default:
+                vo.setTodoType("UNKNOWN");
+                vo.setTodoName("处理中");
+                vo.setRequirement("申请正在处理中，请耐心等待");
+        }
+        return vo;
+    }
+
+    private LocalDateTime findTaskDeadline(Long applicationId, Integer taskType) {
+        LambdaQueryWrapper<CollaborationTask> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CollaborationTask::getApplicationId, applicationId)
+                .eq(CollaborationTask::getTaskType, taskType)
+                .orderByDesc(CollaborationTask::getCreateTime)
+                .last("LIMIT 1");
+        CollaborationTask task = taskMapper.selectOne(wrapper);
+        return task != null ? task.getDeadlineTime() : null;
+    }
+
+    private SupplementRecord getLatestSupplement(Long applicationId) {
+        LambdaQueryWrapper<SupplementRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SupplementRecord::getApplicationId, applicationId)
+                .orderByDesc(SupplementRecord::getSupplementRound, SupplementRecord::getId)
+                .last("LIMIT 1");
+        return supplementRecordMapper.selectOne(wrapper);
+    }
+
+    private com.hf.transfer.domain.vo.ApplicationCallbackVO.UrgeRecordVO convertUrgeRecord(UrgeRecord urge) {
+        com.hf.transfer.domain.vo.ApplicationCallbackVO.UrgeRecordVO vo = new com.hf.transfer.domain.vo.ApplicationCallbackVO.UrgeRecordVO();
+        vo.setUrgeType(urge.getUrgeType());
+        com.hf.transfer.common.enums.UrgeTypeEnum typeEnum = com.hf.transfer.common.enums.UrgeTypeEnum.getByCode(urge.getUrgeType());
+        vo.setUrgeTypeName(typeEnum != null ? typeEnum.getName() : "未知");
+        vo.setUrgeLevel(urge.getUrgeLevel());
+        vo.setUrgeLevelName(urge.getUrgeLevel() == 1 ? "一般提醒" : urge.getUrgeLevel() == 2 ? "重要提醒" : "加急");
+        vo.setUrgeContent(urge.getUrgeContent());
+        vo.setOperatorName(urge.getUrgeOperatorName());
+        vo.setUrgeTime(urge.getCreateTime());
+        vo.setIsEscalated(urge.getIsEscalated() != null && urge.getIsEscalated());
+        vo.setEscalateTo(urge.getEscalateToCenter());
+        return vo;
+    }
+
+    @Override
+    public com.hf.transfer.domain.vo.ArchiveSummaryVO getArchiveSummary(String applicationNo) {
+        LambdaQueryWrapper<TransferApplication> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TransferApplication::getApplicationNo, applicationNo);
+        TransferApplication app = applicationMapper.selectOne(wrapper);
+        if (app == null) {
+            throw new BusinessException(BusinessErrorEnum.APPLICATION_NOT_FOUND);
+        }
+
+        com.hf.transfer.domain.vo.ArchiveSummaryVO archive = new com.hf.transfer.domain.vo.ArchiveSummaryVO();
+        archive.setArchiveNo("ARC" + System.currentTimeMillis() + RandomUtil.randomNumbers(4));
+        archive.setArchiveTime(LocalDateTime.now());
+
+        com.hf.transfer.domain.vo.ArchiveSummaryVO.BasicInfoVO basic = new com.hf.transfer.domain.vo.ArchiveSummaryVO.BasicInfoVO();
+        BeanUtils.copyProperties(app, basic);
+        ChannelTypeEnum channelTypeEnum = ChannelTypeEnum.getByCode(app.getChannelType());
+        basic.setChannelTypeName(channelTypeEnum != null ? channelTypeEnum.getName() : "未知渠道");
+        basic.setIdCardTypeName(app.getIdCardType() == 1 ? "居民身份证" : "其他证件");
+        basic.setTransferTypeName(app.getTransferType() == 1 ? "异地转移接续" : app.getTransferType() == 2 ? "同城转移" : "跨机构转移");
+        basic.setTransferOutRegionName(getRegionName(app.getTransferOutRegion()));
+        basic.setTransferInRegionName(getRegionName(app.getTransferInRegion()));
+        ApplicationStatusEnum finalStatus = ApplicationStatusEnum.getByCode(app.getApplicationStatus());
+        basic.setFinalStatusName(finalStatus != null ? finalStatus.getName() : "");
+        archive.setBasicInfo(basic);
+
+        try {
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.RuleValidationResultVO ruleResult = new com.hf.transfer.domain.vo.ArchiveSummaryVO.RuleValidationResultVO();
+            RuleValidationService.RuleValidateVO validateVO = ruleValidationService.validateFull(app);
+            ruleResult.setPassed(validateVO.isPassed());
+            RegionRule outRule = ruleValidationService.matchRegionRule(app.getTransferOutRegion(), 1);
+            RegionRule inRule = ruleValidationService.matchRegionRule(app.getTransferInRegion(), 2);
+            if (outRule != null) {
+                ruleResult.setOutRegionRuleName(outRule.getRuleName());
+            }
+            if (inRule != null) {
+                ruleResult.setInRegionRuleName(inRule.getRuleName());
+                ruleResult.setMinContributionMonths(inRule.getMinContributionMonths());
+            }
+            ruleResult.setCheckItems(validateVO.getPassedItems());
+            ruleResult.setWarnings(validateVO.getWarnings());
+            ruleResult.setIsDuplicate(app.getIsDuplicate() != null && app.getIsDuplicate() == 1);
+            ruleResult.setIsConflict(app.getIsConflict() != null && app.getIsConflict() == 1);
+            ruleResult.setDuplicateAppNo(app.getDuplicateAppNo());
+            ruleResult.setConflictReason(app.getConflictReason());
+            ruleResult.setAuditTime(app.getAuditTime());
+            archive.setRuleValidationResult(ruleResult);
+        } catch (Exception e) {
+            log.warn("[归档摘要] 规则校验信息获取失败 申请:{}", applicationNo, e);
+        }
+
+        List<CollaborationTask> tasks = collaborationFlowService.getApplicationTasks(app.getId());
+        archive.setCollaborationTasks(tasks.stream().map(t -> {
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.CollaborationTaskVO taskVO = new com.hf.transfer.domain.vo.ArchiveSummaryVO.CollaborationTaskVO();
+            BeanUtils.copyProperties(t, taskVO);
+            taskVO.setTaskTypeName(getTaskTypeName(t.getTaskType()));
+            taskVO.setSourceRegionName(getRegionName(t.getSourceRegion()));
+            taskVO.setTargetRegionName(getRegionName(t.getTargetRegion()));
+            TaskStatusEnum taskStatus = TaskStatusEnum.getByCode(t.getTaskStatus());
+            taskVO.setTaskStatusName(taskStatus != null ? taskStatus.getName() : "");
+            taskVO.setConfirmResultName(t.getConfirmResult() != null ? (t.getConfirmResult() == 1 ? "通过" : "退回") : "");
+            return taskVO;
+        }).collect(Collectors.toList()));
+
+        List<CollaborationTask> rejectedTasks = tasks.stream()
+                .filter(t -> TaskStatusEnum.REJECTED.getCode().equals(t.getTaskStatus()))
+                .collect(Collectors.toList());
+        archive.setRejectRecords(rejectedTasks.stream().map(t -> {
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.RejectRecordVO rejectVO = new com.hf.transfer.domain.vo.ArchiveSummaryVO.RejectRecordVO();
+            rejectVO.setTaskNo(t.getTaskNo());
+            rejectVO.setRejectReasonCode(t.getRejectReasonCode());
+            rejectVO.setRejectReasonName(t.getRejectReasonName());
+            if (t.getRejectReasonCode() != null) {
+                RejectReason reason = rejectReasonMapper.selectById(t.getRejectReasonCode());
+                if (reason != null) {
+                    rejectVO.setRejectReasonDetail(reason.getReasonDetail());
+                    rejectVO.setSupplementGuide(reason.getSupplementGuide());
+                    rejectVO.setNeedSupplement(reason.getIsNeedSupplement() != null && reason.getIsNeedSupplement() == 1);
+                }
+            }
+            rejectVO.setRemark(t.getConfirmRemark());
+            rejectVO.setOperatorName(t.getOperatorName());
+            rejectVO.setOperateRegion(getRegionName(t.getTargetRegion()));
+            rejectVO.setOperateTime(t.getConfirmTime());
+            return rejectVO;
+        }).collect(Collectors.toList()));
+
+        LambdaQueryWrapper<SupplementRecord> suppWrapper = new LambdaQueryWrapper<>();
+        suppWrapper.eq(SupplementRecord::getApplicationId, app.getId())
+                .orderByAsc(SupplementRecord::getSupplementRound, SupplementRecord::getId);
+        List<SupplementRecord> supplements = supplementRecordMapper.selectList(suppWrapper);
+        archive.setSupplementRecords(supplements.stream().map(s -> {
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.SupplementRecordVO suppVO = new com.hf.transfer.domain.vo.ArchiveSummaryVO.SupplementRecordVO();
+            BeanUtils.copyProperties(s, suppVO);
+            suppVO.setRequestRegion(getRegionName(s.getRequestRegion()));
+            suppVO.setAuditResultName(s.getAuditResult() != null ? (s.getAuditResult() == 1 ? "审核通过" : "审核不通过") : "");
+            suppVO.setSupplementStatusName(getSupplementStatusName(s.getSupplementStatus()));
+            return suppVO;
+        }).collect(Collectors.toList()));
+
+        LambdaQueryWrapper<UrgeRecord> urgeWrapper = new LambdaQueryWrapper<>();
+        urgeWrapper.eq(UrgeRecord::getApplicationId, app.getId())
+                .orderByAsc(UrgeRecord::getCreateTime);
+        List<UrgeRecord> urges = urgeRecordMapper.selectList(urgeWrapper);
+        archive.setUrgeRecords(urges.stream().map(u -> {
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.UrgeRecordVO urgeVO = new com.hf.transfer.domain.vo.ArchiveSummaryVO.UrgeRecordVO();
+            BeanUtils.copyProperties(u, urgeVO);
+            com.hf.transfer.common.enums.UrgeTypeEnum typeEnum = com.hf.transfer.common.enums.UrgeTypeEnum.getByCode(u.getUrgeType());
+            urgeVO.setUrgeTypeName(typeEnum != null ? typeEnum.getName() : "");
+            urgeVO.setUrgeLevelName(u.getUrgeLevel() == 1 ? "一般提醒" : u.getUrgeLevel() == 2 ? "重要提醒" : "加急");
+            urgeVO.setIsEscalated(u.getIsEscalated() != null && u.getIsEscalated());
+            urgeVO.setEscalateToRegion(getRegionName(u.getEscalateToRegion()));
+            return urgeVO;
+        }).collect(Collectors.toList()));
+
+        List<ApplicationStatusLog> statusLogs = statusLogService.queryByApplicationId(app.getId());
+        archive.setStatusLogs(statusLogs.stream().map(sl -> {
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.StatusLogVO logVO = new com.hf.transfer.domain.vo.ArchiveSummaryVO.StatusLogVO();
+            BeanUtils.copyProperties(sl, logVO);
+            logVO.setFromStatusName(ApplicationStatusEnum.getByCode(sl.getFromStatus()) != null
+                    ? ApplicationStatusEnum.getByCode(sl.getFromStatus()).getName() : "");
+            logVO.setToStatusName(ApplicationStatusEnum.getByCode(sl.getToStatus()) != null
+                    ? ApplicationStatusEnum.getByCode(sl.getToStatus()).getName() : "");
+            logVO.setOperateRegion(getRegionName(sl.getOperateRegion()));
+            logVO.setOperateTime(sl.getCreateTime());
+            return logVO;
+        }).collect(Collectors.toList()));
+
+        LambdaQueryWrapper<OperationLog> opWrapper = new LambdaQueryWrapper<>();
+        opWrapper.eq(OperationLog::getBizId, app.getId().toString())
+                .or()
+                .eq(OperationLog::getBizNo, app.getApplicationNo());
+        opWrapper.orderByAsc(OperationLog::getCreateTime);
+        List<OperationLog> opLogs = operationLogMapper.selectList(opWrapper);
+        archive.setOperationLogs(opLogs.stream().map(ol -> {
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.OperationLogVO opVO = new com.hf.transfer.domain.vo.ArchiveSummaryVO.OperationLogVO();
+            BeanUtils.copyProperties(ol, opVO);
+            return opVO;
+        }).collect(Collectors.toList()));
+
+        com.hf.transfer.domain.vo.ArchiveSummaryVO.SummaryStatisticsVO stats = new com.hf.transfer.domain.vo.ArchiveSummaryVO.SummaryStatisticsVO();
+        if (app.getSubmitTime() != null && app.getCompleteTime() != null) {
+            long minutes = Duration.between(app.getSubmitTime(), app.getCompleteTime()).toMinutes();
+            stats.setTotalDurationMinutes(minutes);
+            stats.setTotalDurationDays(minutes / 1440);
+        }
+        if (app.getAuditTime() != null && app.getTransferOutTime() != null) {
+            stats.setTransferOutDurationHours((int) Duration.between(app.getAuditTime(), app.getTransferOutTime()).toHours());
+        }
+        if (app.getTransferOutTime() != null && app.getTransferInTime() != null) {
+            stats.setTransferInDurationHours((int) Duration.between(app.getTransferOutTime(), app.getTransferInTime()).toHours());
+        }
+        stats.setRejectCount(app.getRejectCount() == null ? 0 : app.getRejectCount());
+        stats.setSupplementCount(app.getSupplementCount() == null ? 0 : app.getSupplementCount());
+        stats.setUrgeCount(app.getUrgeCount() == null ? 0 : app.getUrgeCount());
+        stats.setEscalateCount((int) urges.stream().filter(u -> u.getIsEscalated() != null && u.getIsEscalated()).count());
+        if (stats.getTotalDurationDays() != null) {
+            if (stats.getTotalDurationDays() <= 3) stats.setProcessingEfficiencyLevel("优秀");
+            else if (stats.getTotalDurationDays() <= 7) stats.setProcessingEfficiencyLevel("良好");
+            else if (stats.getTotalDurationDays() <= 15) stats.setProcessingEfficiencyLevel("合格");
+            else stats.setProcessingEfficiencyLevel("超时");
+        }
+        archive.setStatistics(stats);
+
+        log.info("[归档摘要] 申请[{}] 归档摘要已生成 档案号:{}", app.getApplicationNo(), archive.getArchiveNo());
+        return archive;
+    }
+
+    private String getSupplementStatusName(Integer status) {
+        if (status == null) return "";
+        switch (status) {
+            case 10: return "待提交";
+            case 20: return "已提交待审核";
+            case 30: return "审核通过";
+            case 40: return "审核不通过";
+            default: return "未知状态";
+        }
     }
 }

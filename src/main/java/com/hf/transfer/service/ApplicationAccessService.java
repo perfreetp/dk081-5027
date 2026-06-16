@@ -18,4 +18,8 @@ public interface ApplicationAccessService {
     PageResult<ApplicationListVO> queryApplicationPage(ApplicationQueryDTO dto);
 
     void cancelApplication(Long id, String operatorId, String operatorName, String reason);
+
+    com.hf.transfer.domain.vo.ApplicationCallbackVO getCallbackInfo(String applicationNo);
+
+    com.hf.transfer.domain.vo.ArchiveSummaryVO getArchiveSummary(String applicationNo);
 }

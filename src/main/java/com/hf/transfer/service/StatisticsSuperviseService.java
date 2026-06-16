@@ -29,4 +29,6 @@ public interface StatisticsSuperviseService {
 
     EfficiencyAnalysisVO getEfficiencyAnalysis(LocalDateTime startTime, LocalDateTime endTime,
                                                 String regionCode);
+
+    TodoDashboardVO getTodoDashboard(String regionCode);
 }

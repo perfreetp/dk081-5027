@@ -677,4 +677,146 @@ public class StatisticsSuperviseServiceImpl implements StatisticsSuperviseServic
         RegionInfo r = getRegionByCode(code);
         return r != null ? r.getRegionName() : code;
     }
+
+    @Override
+    public TodoDashboardVO getTodoDashboard(String regionCode) {
+        TodoDashboardVO dashboard = new TodoDashboardVO();
+
+        List<RegionInfo> regions;
+        if (StrUtil.isNotBlank(regionCode)) {
+            RegionInfo r = getRegionByCode(regionCode);
+            regions = r != null ? Collections.singletonList(r) : Collections.emptyList();
+        } else {
+            regions = regionInfoMapper.selectList(new LambdaQueryWrapper<RegionInfo>()
+                    .eq(RegionInfo::getStatus, 1)
+                    .orderByAsc(RegionInfo::getSortOrder));
+        }
+
+        LambdaQueryWrapper<TransferApplication> baseAppWrapper = new LambdaQueryWrapper<>();
+        baseAppWrapper.in(TransferApplication::getApplicationStatus, PROCESSING_STATUS);
+        if (StrUtil.isNotBlank(regionCode)) {
+            baseAppWrapper.and(w -> w.eq(TransferApplication::getCurrentRegion, regionCode));
+        }
+        List<TransferApplication> allPending = applicationMapper.selectList(baseAppWrapper);
+
+        dashboard.setTotalPending(allPending.size());
+        dashboard.setPendingAccept((int) countByStatus(allPending, Arrays.asList(10, 20)));
+        dashboard.setPendingTransferOut((int) countByStatus(allPending, Arrays.asList(30, 40)));
+        dashboard.setPendingTransferIn((int) countByStatus(allPending, Arrays.asList(50, 60)));
+        dashboard.setPendingSupplement((int) countByStatus(allPending, Arrays.asList(70)));
+
+        LocalDateTime now = LocalDateTime.now();
+        LambdaQueryWrapper<CollaborationTask> taskWrapper = new LambdaQueryWrapper<>();
+        taskWrapper.in(CollaborationTask::getTaskStatus, TIMEOUT_TASK_STATUS);
+        if (StrUtil.isNotBlank(regionCode)) {
+            taskWrapper.and(w -> w.eq(CollaborationTask::getTargetRegion, regionCode)
+                    .or().eq(CollaborationTask::getSourceRegion, regionCode));
+        }
+        List<CollaborationTask> allTasks = taskMapper.selectList(taskWrapper);
+
+        int approaching = 0;
+        int timeout = 0;
+        for (CollaborationTask task : allTasks) {
+            if (task.getDeadlineTime() == null) continue;
+            long hours = Duration.between(now, task.getDeadlineTime()).toHours();
+            if (hours <= 24 && hours > 0) approaching++;
+            if (hours <= 0) timeout++;
+        }
+        dashboard.setApproachingTimeout(approaching);
+        dashboard.setAlreadyTimeout(timeout);
+        dashboard.setPendingUrge(approaching + timeout);
+
+        List<CenterTodoVO> centerTodos = new ArrayList<>();
+        for (RegionInfo region : regions) {
+            CenterTodoVO centerTodo = new CenterTodoVO();
+            centerTodo.setRegionCode(region.getRegionCode());
+            centerTodo.setRegionName(region.getRegionName());
+            centerTodo.setCenterName(region.getCenterName());
+
+            List<TransferApplication> regionApps = allPending.stream()
+                    .filter(a -> region.getRegionCode().equals(a.getCurrentRegion()))
+                    .collect(Collectors.toList());
+
+            centerTodo.setTotalCount(regionApps.size());
+            centerTodo.setPendingAccept(buildTodoCategory(regionApps, Arrays.asList(10, 20), now));
+            centerTodo.setPendingTransferOut(buildTodoCategory(regionApps, Arrays.asList(30, 40), now));
+            centerTodo.setPendingTransferIn(buildTodoCategory(regionApps, Arrays.asList(50, 60), now));
+            centerTodo.setPendingSupplement(buildTodoCategory(regionApps, Arrays.asList(70), now));
+
+            List<CollaborationTask> regionTasks = allTasks.stream()
+                    .filter(t -> region.getRegionCode().equals(t.getTargetRegion()))
+                    .collect(Collectors.toList());
+
+            centerTodo.setApproachingTimeout(buildTaskTodoCategory(regionTasks, now, true));
+            centerTodo.setAlreadyTimeout(buildTaskTodoCategory(regionTasks, now, false));
+
+            centerTodos.add(centerTodo);
+        }
+        centerTodos.sort((a, b) -> Integer.compare(b.getTotalCount(), a.getTotalCount()));
+        dashboard.setCenterTodos(centerTodos);
+
+        return dashboard;
+    }
+
+    private TodoCategoryVO buildTodoCategory(List<TransferApplication> apps, List<Integer> statusList, LocalDateTime now) {
+        TodoCategoryVO category = new TodoCategoryVO();
+        List<TodoItemVO> items = new ArrayList<>();
+
+        List<TransferApplication> filtered = apps.stream()
+                .filter(a -> statusList.contains(a.getApplicationStatus()))
+                .collect(Collectors.toList());
+
+        category.setCount(filtered.size());
+
+        for (TransferApplication app : filtered) {
+            TodoItemVO item = new TodoItemVO();
+            item.setApplicationId(app.getId());
+            item.setApplicationNo(app.getApplicationNo());
+            item.setApplicantName(app.getApplicantName());
+            item.setIdCardNo(maskIdCard(app.getIdCardNo()));
+            item.setTransferOutRegionName(getRegionName(app.getTransferOutRegion()));
+            item.setTransferInRegionName(getRegionName(app.getTransferInRegion()));
+            item.setTransferAmount(app.getTransferAmount());
+            item.setApplicationStatus(app.getApplicationStatus());
+            ApplicationStatusEnum statusEnum = ApplicationStatusEnum.getByCode(app.getApplicationStatus());
+            item.setApplicationStatusName(statusEnum != null ? statusEnum.getName() : "");
+            item.setSubmitTime(app.getSubmitTime());
+            item.setCurrentNode(app.getCurrentNode());
+            items.add(item);
+        }
+        category.setItems(items);
+        return category;
+    }
+
+    private TodoCategoryVO buildTaskTodoCategory(List<CollaborationTask> tasks, LocalDateTime now, boolean approaching) {
+        TodoCategoryVO category = new TodoCategoryVO();
+        List<TodoItemVO> items = new ArrayList<>();
+
+        for (CollaborationTask task : tasks) {
+            if (task.getDeadlineTime() == null) continue;
+            long hours = Duration.between(now, task.getDeadlineTime()).toHours();
+            boolean match = approaching ? (hours <= 24 && hours > 0) : (hours <= 0);
+            if (!match) continue;
+
+            TodoItemVO item = new TodoItemVO();
+            item.setApplicationId(task.getApplicationId());
+            item.setApplicationNo(task.getApplicationNo());
+            item.setTransferOutRegionName(getRegionName(task.getSourceRegion()));
+            item.setTransferInRegionName(getRegionName(task.getTargetRegion()));
+            item.setApplicationStatus(task.getTaskStatus());
+            item.setApplicationStatusName(task.getTaskStatus() != null ?
+                    (task.getTaskStatus() == 50 ? "处理中" : task.getTaskStatus() == 60 ? "超时未处理" : "") : "");
+            item.setDeadlineTime(task.getDeadlineTime());
+            item.setRemainingHours(Math.abs(hours));
+            items.add(item);
+        }
+        category.setCount(items.size());
+        category.setItems(items);
+        return category;
+    }
+
+    private String maskIdCard(String idCard) {
+        if (StrUtil.isBlank(idCard) || idCard.length() < 8) return idCard;
+        return idCard.substring(0, 6) + "********" + idCard.substring(idCard.length() - 4);
+    }
 }

@@ -41,6 +41,14 @@ public class UrgeRecord implements Serializable {
 
     private String urgeOperatorName;
 
+    private Boolean isEscalated;
+
+    private String escalateToRegion;
+
+    private String escalateToCenter;
+
+    private Integer escalateLevel;
+
     @TableLogic
     @TableField(fill = FieldFill.INSERT)
     private Integer deleted;

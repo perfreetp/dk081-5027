@@ -37,4 +37,6 @@ public interface ExceptionHandleService {
                                             String targetRegion, Integer urgeType,
                                             java.time.LocalDateTime startTime,
                                             java.time.LocalDateTime endTime);
+
+    java.util.List<UrgeRecord> getUrgeRecordsByApplication(Long applicationId);
 }

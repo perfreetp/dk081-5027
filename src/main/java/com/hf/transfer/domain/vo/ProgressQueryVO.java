@@ -34,4 +34,5 @@ public class ProgressQueryVO implements Serializable {
     private Integer urgeCount;
 
     private List<ProgressStepVO> steps;
+    private List<com.hf.transfer.domain.vo.ApplicationCallbackVO.UrgeRecordVO> urgeLogs;
 }

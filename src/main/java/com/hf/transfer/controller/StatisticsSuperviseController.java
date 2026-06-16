@@ -100,4 +100,11 @@ public class StatisticsSuperviseController {
             @RequestParam(required = false) String regionCode) {
         return R.success(statisticsSuperviseService.getEfficiencyAnalysis(startTime, endTime, regionCode));
     }
+
+    @Operation(summary = "待办驾驶舱", description = "按管理中心查看待受理/待转出/待转入/待补正/即将超时数量，附带可点击追踪的申请编号列表")
+    @GetMapping("/dashboard")
+    public R<TodoDashboardVO> getTodoDashboard(
+            @Parameter(description = "指定地区编码（不传则查看所有中心）") @RequestParam(required = false) String regionCode) {
+        return R.success(statisticsSuperviseService.getTodoDashboard(regionCode));
+    }
 }

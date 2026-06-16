@@ -221,6 +221,10 @@ CREATE TABLE hf_urge_record (
     notify_response     VARCHAR(256),
     urge_operator_id    VARCHAR(64),
     urge_operator_name  VARCHAR(64),
+    is_escalated        SMALLINT        NOT NULL DEFAULT 0,
+    escalate_to_region  VARCHAR(12),
+    escalate_to_center  VARCHAR(128),
+    escalate_level      INT,
     deleted             SMALLINT        NOT NULL DEFAULT 0,
     create_time         TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)

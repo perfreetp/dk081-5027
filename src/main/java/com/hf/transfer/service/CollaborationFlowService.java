@@ -25,4 +25,8 @@ public interface CollaborationFlowService {
     CollaborationTask getTaskDetail(Long taskId);
 
     void syncTaskToTarget(Long taskId);
+
+    com.hf.transfer.domain.vo.BatchResultVO batchConfirmOut(com.hf.transfer.domain.dto.BatchConfirmOutDTO dto);
+
+    com.hf.transfer.domain.vo.BatchResultVO batchReject(com.hf.transfer.domain.dto.BatchRejectDTO dto);
 }

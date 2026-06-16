@@ -5,8 +5,10 @@ import com.hf.transfer.common.PageResult;
 import com.hf.transfer.common.annotation.OpLog;
 import com.hf.transfer.domain.dto.ApplicationQueryDTO;
 import com.hf.transfer.domain.dto.TransferApplyDTO;
+import com.hf.transfer.domain.vo.ApplicationCallbackVO;
 import com.hf.transfer.domain.vo.ApplicationDetailVO;
 import com.hf.transfer.domain.vo.ApplicationListVO;
+import com.hf.transfer.domain.vo.ArchiveSummaryVO;
 import com.hf.transfer.domain.vo.ProgressQueryVO;
 import com.hf.transfer.service.ApplicationAccessService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -70,5 +72,20 @@ public class ApplicationAccessController {
             @RequestHeader(value = "X-Operator-Name", required = false) String operatorName) {
         applicationAccessService.cancelApplication(id, operatorId, operatorName, reason);
         return R.success("取消成功", null);
+    }
+
+    @Operation(summary = "外部回调查询", description = "第三方系统对接专用，返回稳定字段：当前节点、最近一次操作、下一步待办、催办升级记录")
+    @GetMapping("/callback")
+    public R<ApplicationCallbackVO> getCallbackInfo(
+            @Parameter(description = "申请编号", required = true) @RequestParam String applicationNo) {
+        return R.success(applicationAccessService.getCallbackInfo(applicationNo));
+    }
+
+    @Operation(summary = "归档摘要查询", description = "办结后生成的结构化档案摘要，包含申请信息、规则校验结果、全部协同任务、退件补正记录和操作留痕")
+    @GetMapping("/archive/{applicationNo}")
+    @OpLog(logType = "APPLICATION", bizType = "QUERY", module = "申请接入", desc = "查询归档摘要")
+    public R<ArchiveSummaryVO> getArchiveSummary(
+            @Parameter(description = "申请编号", required = true) @PathVariable String applicationNo) {
+        return R.success(applicationAccessService.getArchiveSummary(applicationNo));
     }
 }

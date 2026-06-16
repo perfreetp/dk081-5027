@@ -54,6 +54,7 @@ public interface RuleValidationService {
         private boolean passed;
         private List<String> passedItems;
         private List<String> failedItems;
+        private List<String> warnings;
         private String suggestion;
         private String rejectReasonCode;
         private String rejectReasonName;

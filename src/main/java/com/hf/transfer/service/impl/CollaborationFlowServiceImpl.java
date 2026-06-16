@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -300,5 +301,97 @@ public class CollaborationFlowServiceImpl implements CollaborationFlowService {
         taskMapper.updateById(task);
         log.info("[协同推送] 任务[{}] 推送至地区[{}] 尝试次数:{}",
                 task.getTaskNo(), task.getTargetRegion(), task.getSyncAttempts());
+    }
+
+    @Override
+    public com.hf.transfer.domain.vo.BatchResultVO batchConfirmOut(com.hf.transfer.domain.dto.BatchConfirmOutDTO dto) {
+        com.hf.transfer.domain.vo.BatchResultVO result = new com.hf.transfer.domain.vo.BatchResultVO();
+        List<com.hf.transfer.domain.vo.BatchResultItemVO> items = new ArrayList<>();
+        int successCount = 0;
+        int failCount = 0;
+
+        if (dto.getItems() != null && !dto.getItems().isEmpty()) {
+            for (com.hf.transfer.domain.dto.BatchConfirmOutDTO.BatchConfirmOutItem item : dto.getItems()) {
+                com.hf.transfer.domain.vo.BatchResultItemVO itemResult = new com.hf.transfer.domain.vo.BatchResultItemVO();
+                itemResult.setTaskId(item.getTaskId());
+
+                CollaborationTask task = taskMapper.selectById(item.getTaskId());
+                if (task != null) {
+                    itemResult.setApplicationNo(task.getApplicationNo());
+                }
+
+                try {
+                    confirmTransferOut(item.getTaskId(),
+                            dto.getOperatorId(), dto.getOperatorName(),
+                            item.getRemark(), item.getActualAmount());
+                    itemResult.setSuccess(true);
+                    itemResult.setMessage("转出确认成功");
+                    successCount++;
+                } catch (Exception e) {
+                    itemResult.setSuccess(false);
+                    itemResult.setMessage("转出确认失败");
+                    itemResult.setFailReason(e.getMessage());
+                    failCount++;
+                    log.warn("[批量转出确认] 任务[{}] 处理失败: {}", item.getTaskId(), e.getMessage());
+                }
+                items.add(itemResult);
+            }
+        }
+
+        result.setTotalCount(dto.getItems() != null ? dto.getItems().size() : 0);
+        result.setSuccessCount(successCount);
+        result.setFailCount(failCount);
+        result.setResults(items);
+
+        log.info("[批量转出确认] 处理完成 总:{} 成功:{} 失败:{}",
+                result.getTotalCount(), successCount, failCount);
+        return result;
+    }
+
+    @Override
+    public com.hf.transfer.domain.vo.BatchResultVO batchReject(com.hf.transfer.domain.dto.BatchRejectDTO dto) {
+        com.hf.transfer.domain.vo.BatchResultVO result = new com.hf.transfer.domain.vo.BatchResultVO();
+        List<com.hf.transfer.domain.vo.BatchResultItemVO> items = new ArrayList<>();
+        int successCount = 0;
+        int failCount = 0;
+
+        if (dto.getItems() != null && !dto.getItems().isEmpty()) {
+            for (com.hf.transfer.domain.dto.BatchRejectDTO.BatchRejectItem item : dto.getItems()) {
+                com.hf.transfer.domain.vo.BatchResultItemVO itemResult = new com.hf.transfer.domain.vo.BatchResultItemVO();
+                itemResult.setTaskId(item.getTaskId());
+
+                CollaborationTask task = taskMapper.selectById(item.getTaskId());
+                if (task != null) {
+                    itemResult.setApplicationNo(task.getApplicationNo());
+                }
+
+                try {
+                    rejectTask(item.getTaskId(),
+                            dto.getOperatorId(), dto.getOperatorName(),
+                            item.getRejectReasonCode(), item.getRejectReasonName(),
+                            item.getRemark(), item.getSupplementItems(),
+                            item.getNeedSupplement() != null && item.getNeedSupplement());
+                    itemResult.setSuccess(true);
+                    itemResult.setMessage("退回成功");
+                    successCount++;
+                } catch (Exception e) {
+                    itemResult.setSuccess(false);
+                    itemResult.setMessage("退回失败");
+                    itemResult.setFailReason(e.getMessage());
+                    failCount++;
+                    log.warn("[批量退回] 任务[{}] 处理失败: {}", item.getTaskId(), e.getMessage());
+                }
+                items.add(itemResult);
+            }
+        }
+
+        result.setTotalCount(dto.getItems() != null ? dto.getItems().size() : 0);
+        result.setSuccessCount(successCount);
+        result.setFailCount(failCount);
+        result.setResults(items);
+
+        log.info("[批量退回] 处理完成 总:{} 成功:{} 失败:{}",
+                result.getTotalCount(), successCount, failCount);
+        return result;
     }
 }

@@ -243,6 +243,7 @@ public class RuleValidationServiceImpl implements RuleValidationService {
 
         vo.setPassedItems(passedItems);
         vo.setFailedItems(failedItems);
+        vo.setWarnings(new ArrayList<>());
         vo.setPassed(CollectionUtils.isEmpty(failedItems));
         if (!vo.isPassed()) {
             vo.setSuggestion("请处理上述" + failedItems.size() + "项问题后重新提交或走补正流程");

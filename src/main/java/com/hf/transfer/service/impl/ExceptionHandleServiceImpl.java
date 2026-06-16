@@ -9,6 +9,8 @@ import com.hf.transfer.common.BusinessException;
 import com.hf.transfer.common.PageResult;
 import com.hf.transfer.common.enums.ApplicationStatusEnum;
 import com.hf.transfer.common.enums.TaskStatusEnum;
+import com.hf.transfer.common.enums.UrgeEscalateLevelEnum;
+import com.hf.transfer.common.enums.UrgeTypeEnum;
 import com.hf.transfer.domain.dto.TransferApplyDTO;
 import com.hf.transfer.domain.entity.ApplicationMaterial;
 import com.hf.transfer.domain.entity.CollaborationTask;
@@ -37,6 +39,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -80,15 +83,58 @@ public class ExceptionHandleServiceImpl implements ExceptionHandleService {
         }
 
         int processed = 0;
+        int escalated = 0;
         for (CollaborationTask task : timeoutTasks) {
             try {
-                doUrgeTask(task, 1, 2, null);
+                long timeoutDays = task.getDeadlineTime() != null
+                        ? Duration.between(task.getDeadlineTime(), now).toDays() : 0;
+                if (timeoutDays < 0) timeoutDays = 0;
+
+                Integer escalateLevel = UrgeEscalateLevelEnum.getEscalateLevelByTimeoutDays(timeoutDays);
+                Integer urgeType;
+                Integer urgeLevel;
+                boolean isEscalated = false;
+                String escalateTo = null;
+
+                if (escalateLevel >= UrgeEscalateLevelEnum.LEVEL_MINISTRY.getLevel()) {
+                    urgeType = 13;
+                    urgeLevel = 3;
+                    isEscalated = true;
+                    escalateTo = "部级监管";
+                } else if (escalateLevel >= UrgeEscalateLevelEnum.LEVEL_PROVINCE.getLevel()) {
+                    urgeType = 12;
+                    urgeLevel = 3;
+                    isEscalated = true;
+                    escalateTo = "省级监管";
+                } else if (escalateLevel >= UrgeEscalateLevelEnum.LEVEL_CENTER.getLevel()) {
+                    urgeType = 11;
+                    urgeLevel = 3;
+                    isEscalated = true;
+                    escalateTo = "中心主任";
+                } else {
+                    urgeType = 1;
+                    urgeLevel = 2;
+                }
+
+                doUrgeTask(task, urgeType, urgeLevel, null);
                 processed++;
+
+                if (isEscalated) {
+                    escalated++;
+                    UrgeRecord lastUrge = getLastUrgeRecord(task.getId());
+                    if (lastUrge != null) {
+                        lastUrge.setIsEscalated(true);
+                        lastUrge.setEscalateLevel(escalateLevel);
+                        lastUrge.setEscalateToRegion(task.getTargetRegion());
+                        lastUrge.setEscalateToCenter(escalateTo);
+                        urgeRecordMapper.updateById(lastUrge);
+                    }
+                }
             } catch (Exception e) {
                 log.error("[超时催办] 处理任务[{}]异常", task.getTaskNo(), e);
             }
         }
-        log.info("[超时催办] 定时任务完成，共处理{}个超时任务", processed);
+        log.info("[超时催办] 定时任务完成，共处理{}个超时任务，升级{}个", processed, escalated);
     }
 
     @Override
@@ -420,6 +466,22 @@ public class ExceptionHandleServiceImpl implements ExceptionHandleService {
 
         IPage<UrgeRecord> page = urgeRecordMapper.selectPage(new Page<>(current, size), wrapper);
         return PageResult.of(page);
+    }
+
+    @Override
+    public List<UrgeRecord> getUrgeRecordsByApplication(Long applicationId) {
+        LambdaQueryWrapper<UrgeRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UrgeRecord::getApplicationId, applicationId)
+                .orderByDesc(UrgeRecord::getCreateTime);
+        return urgeRecordMapper.selectList(wrapper);
+    }
+
+    private UrgeRecord getLastUrgeRecord(Long taskId) {
+        LambdaQueryWrapper<UrgeRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UrgeRecord::getTaskId, taskId)
+                .orderByDesc(UrgeRecord::getCreateTime)
+                .last("LIMIT 1");
+        return urgeRecordMapper.selectOne(wrapper);
     }
 
     private SupplementRecord getLatestSupplement(Long applicationId) {

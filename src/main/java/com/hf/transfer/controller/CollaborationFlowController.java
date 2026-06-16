@@ -2,7 +2,10 @@ package com.hf.transfer.controller;
 
 import com.hf.transfer.common.R;
 import com.hf.transfer.common.annotation.OpLog;
+import com.hf.transfer.domain.dto.BatchConfirmOutDTO;
+import com.hf.transfer.domain.dto.BatchRejectDTO;
 import com.hf.transfer.domain.entity.CollaborationTask;
+import com.hf.transfer.domain.vo.BatchResultVO;
 import com.hf.transfer.service.CollaborationFlowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -100,5 +103,27 @@ public class CollaborationFlowController {
             @Parameter(description = "任务ID") @PathVariable Long taskId) {
         collaborationFlowService.syncTaskToTarget(taskId);
         return R.success("推送成功", null);
+    }
+
+    @Operation(summary = "批量转出确认", description = "业务人员一次选多笔申请做转出确认，返回中区分成功/失败及失败原因，单笔失败不影响整批")
+    @PostMapping("/tasks/batch/confirmOut")
+    @OpLog(logType = "TASK", bizType = "BATCH_CONFIRM", module = "协同流转", desc = "批量转出确认")
+    public R<BatchResultVO> batchConfirmOut(@RequestBody BatchConfirmOutDTO dto,
+                                             @RequestHeader(value = "X-Operator-Id", required = false) String operatorId,
+                                             @RequestHeader(value = "X-Operator-Name", required = false) String operatorName) {
+        dto.setOperatorId(operatorId);
+        dto.setOperatorName(operatorName);
+        return R.success(collaborationFlowService.batchConfirmOut(dto));
+    }
+
+    @Operation(summary = "批量退件", description = "业务人员一次选多笔申请做退件，返回中区分成功/失败及失败原因，单笔失败不影响整批")
+    @PostMapping("/tasks/batch/reject")
+    @OpLog(logType = "TASK", bizType = "BATCH_REJECT", module = "协同流转", desc = "批量退件")
+    public R<BatchResultVO> batchReject(@RequestBody BatchRejectDTO dto,
+                                         @RequestHeader(value = "X-Operator-Id", required = false) String operatorId,
+                                         @RequestHeader(value = "X-Operator-Name", required = false) String operatorName) {
+        dto.setOperatorId(operatorId);
+        dto.setOperatorName(operatorName);
+        return R.success(collaborationFlowService.batchReject(dto));
     }
 }
