@@ -12,6 +12,16 @@ public class ArchiveSummaryVO implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private Boolean isCompleted;
+
+    private String currentStatus;
+
+    private String currentStatusName;
+
+    private String currentStatusDesc;
+
+    private List<String> pendingSteps;
+
     private String archiveNo;
 
     private LocalDateTime archiveTime;

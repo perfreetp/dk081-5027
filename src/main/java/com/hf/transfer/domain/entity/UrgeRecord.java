@@ -49,6 +49,8 @@ public class UrgeRecord implements Serializable {
 
     private Integer escalateLevel;
 
+    private String escalateTo;
+
     @TableLogic
     @TableField(fill = FieldFill.INSERT)
     private Integer deleted;

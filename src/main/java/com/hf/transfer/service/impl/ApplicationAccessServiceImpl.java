@@ -236,8 +236,9 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
 
         // 催办升级记录
         List<UrgeRecord> urgeRecords = exceptionHandleService.getUrgeRecordsByApplication(app.getId());
+        List<ApplicationCallbackVO.UrgeRecordVO> urgeVOs = new ArrayList<>();
         if (urgeRecords != null && !urgeRecords.isEmpty()) {
-            List<ApplicationCallbackVO.UrgeRecordVO> urgeVOs = urgeRecords.stream().map(u -> {
+            urgeVOs = urgeRecords.stream().map(u -> {
                 ApplicationCallbackVO.UrgeRecordVO urgeVO = new ApplicationCallbackVO.UrgeRecordVO();
                 urgeVO.setUrgeType(u.getUrgeType());
                 urgeVO.setUrgeTypeName(UrgeTypeEnum.getNameByCode(u.getUrgeType()));
@@ -252,8 +253,8 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
                 }
                 return urgeVO;
             }).collect(Collectors.toList());
-            vo.setUrgeLogs(urgeVOs);
         }
+        vo.setUrgeLogs(urgeVOs);
 
         return vo;
     }
@@ -745,18 +746,55 @@ public class ApplicationAccessServiceImpl implements ApplicationAccessService {
             throw new BusinessException(BusinessErrorEnum.APPLICATION_NOT_FOUND);
         }
 
-        // 办结状态检查：只有已办结/已取消/已终止的申请才能查询归档摘要
+        ApplicationStatusEnum statusEnum = ApplicationStatusEnum.getByCode(app.getApplicationStatus());
         List<Integer> completedStatus = Arrays.asList(80, 90, 95);
-        if (!completedStatus.contains(app.getApplicationStatus())) {
-            ApplicationStatusEnum statusEnum = ApplicationStatusEnum.getByCode(app.getApplicationStatus());
-            String statusName = statusEnum != null ? statusEnum.getName() : "未知状态";
-            String statusDesc = statusEnum != null ? statusEnum.getDescription() : "";
-            String message = String.format("申请当前状态为【%s】，%s。请等待申请办结后再查询归档摘要。", 
-                    statusName, statusDesc);
-            throw new BusinessException(BusinessErrorEnum.APPLICATION_NOT_COMPLETED, message);
-        }
+        boolean isCompleted = completedStatus.contains(app.getApplicationStatus());
 
         com.hf.transfer.domain.vo.ArchiveSummaryVO archive = new com.hf.transfer.domain.vo.ArchiveSummaryVO();
+        archive.setIsCompleted(isCompleted);
+        archive.setCurrentStatus(String.valueOf(app.getApplicationStatus()));
+        archive.setCurrentStatusName(statusEnum != null ? statusEnum.getName() : "");
+        archive.setCurrentStatusDesc(statusEnum != null ? statusEnum.getDescription() : "");
+
+        // 未办结时：返回当前状态 + 缺失环节
+        if (!isCompleted) {
+            List<String> pendingSteps = new ArrayList<>();
+            if (app.getAuditTime() == null) {
+                pendingSteps.add("规则校验");
+            }
+            if (app.getTransferOutTime() == null) {
+                pendingSteps.add("转出地确认转出");
+            }
+            if (app.getTransferInTime() == null) {
+                pendingSteps.add("转入地确认到账");
+            }
+            // 如果有退件或补正，也加到待办
+            if (app.getApplicationStatus().equals(70)) {
+                pendingSteps.add("补充材料并重新提交审核");
+            }
+            if (app.getApplicationStatus().equals(45)) {
+                pendingSteps.add("处理退件，可选择申诉或重新申请");
+            }
+            archive.setPendingSteps(pendingSteps);
+
+            // 未办结时填充基本信息，方便用户了解申请
+            com.hf.transfer.domain.vo.ArchiveSummaryVO.BasicInfoVO basic = new com.hf.transfer.domain.vo.ArchiveSummaryVO.BasicInfoVO();
+            BeanUtils.copyProperties(app, basic);
+            basic.setApplicationNo(app.getApplicationNo());
+            basic.setApplicantName(app.getApplicantName());
+            basic.setIdCardNo(app.getIdCardNo());
+            basic.setTransferOutRegionName(getRegionName(app.getTransferOutRegion()));
+            basic.setTransferInRegionName(getRegionName(app.getTransferInRegion()));
+            basic.setSubmitTime(app.getSubmitTime());
+            basic.setFinalStatusName(statusEnum != null ? statusEnum.getName() : "");
+            ChannelTypeEnum channel = ChannelTypeEnum.getByCode(app.getChannelType());
+            basic.setChannelTypeName(channel != null ? channel.getName() : "");
+            archive.setBasicInfo(basic);
+
+            return archive;
+        }
+
+        // 已办结：生成完整档案
         archive.setArchiveNo("ARC" + System.currentTimeMillis() + RandomUtil.randomNumbers(4));
         archive.setArchiveTime(LocalDateTime.now());
 
